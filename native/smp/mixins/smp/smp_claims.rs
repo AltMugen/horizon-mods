@@ -25,8 +25,8 @@ pub struct Config {
     pub chunks: Vec<[i64; 2]>,
     /// The entities only the owner and trusted players may hit in a claim.
     pub protected_entities: Vec<String>,
-    /// Blocks around 0 0 in the overworld where no one may claim (free for
-    /// all); 0 for none. Claims already there are dropped at start.
+    /// Blocks around 0 0, in every dimension, where no one may claim (free
+    /// for all); 0 for none. Claims already there are dropped at start.
     pub free_radius: i64,
 }
 
@@ -154,8 +154,6 @@ fn key(dimension: &str, cx: i32, cz: i32) -> String {
     format!("{dimension} {cx} {cz}")
 }
 
-const OVERWORLD: &str = "minecraft:overworld";
-
 fn chunk_of(at: &Place) -> (i32, i32) {
     ((at.x.floor() as i32) >> 4, (at.z.floor() as i32) >> 4)
 }
@@ -189,35 +187,34 @@ impl Claims {
         })
     }
 
-    /// Whether a chunk touches the free zone around 0 0.
-    fn in_free_zone(&self, dimension: &str, cx: i32, cz: i32) -> bool {
+    /// Whether a chunk touches the free zone around 0 0 (any dimension).
+    fn in_free_zone(&self, cx: i32, cz: i32) -> bool {
         let r = self.config.free_radius;
         let near = |c: i32| i64::from(c) * 16 <= r && i64::from(c) * 16 + 15 >= -r;
-        r > 0 && dimension == OVERWORLD && near(cx) && near(cz)
+        r > 0 && near(cx) && near(cz)
     }
 
     /// Drops the claims inside the free zone (a radius set after they were
     /// made): one line each, for the log.
     pub fn clear_free_zone(&mut self) -> Vec<String> {
-        let inside: Vec<(i32, i32, u128)> = self
+        let inside: Vec<(String, i32, i32, u128)> = self
             .owners
-            .get(OVERWORLD)
-            .map(|c| {
+            .iter()
+            .flat_map(|(d, c)| {
                 c.iter()
-                    .filter(|((x, z), _)| self.in_free_zone(OVERWORLD, *x, *z))
-                    .map(|((x, z), u)| (*x, *z, *u))
-                    .collect()
+                    .filter(|((x, z), _)| self.in_free_zone(*x, *z))
+                    .map(|((x, z), u)| (d.clone(), *x, *z, *u))
             })
-            .unwrap_or_default();
+            .collect();
         let mut lines = Vec::new();
-        for (cx, cz, owner) in inside {
-            if let Some(c) = self.owners.get_mut(OVERWORLD) {
+        for (dimension, cx, cz, owner) in inside {
+            if let Some(c) = self.owners.get_mut(&dimension) {
                 c.remove(&(cx, cz));
             }
-            self.data.chunks.remove(&key(OVERWORLD, cx, cz));
+            self.data.chunks.remove(&key(&dimension, cx, cz));
             self.changed = true;
             lines.push(format!(
-                "chunk {cx} {cz} (x {}, z {}) of {} is in the free zone: unclaimed",
+                "chunk {cx} {cz} (x {}, z {}) in {dimension} of {} is in the free zone: unclaimed",
                 cx * 16,
                 cz * 16,
                 smp_store::uuid_string(owner)
@@ -369,7 +366,7 @@ impl Claims {
             ("claim", []) => match self.chunk_owner(here, cx, cz) {
                 Some(u) if u == me.uuid => vec![Out::Error("This chunk is already yours.".into())],
                 Some(u) => vec![Out::Error(format!("This chunk is {}'s.", name_of(u)))],
-                None if self.in_free_zone(here, cx, cz) => vec![Out::Error(format!(
+                None if self.in_free_zone(cx, cz) => vec![Out::Error(format!(
                     "No claims within {} blocks of 0 0: that land is free for all.",
                     self.config.free_radius
                 ))],
@@ -584,7 +581,7 @@ mod tests {
             )
             .unwrap();
         assert!(matches!(&out[0], Out::Error(e) if e.contains("free for all")));
-        // The Nether keeps its claims rules.
+        // The zone is the same in every dimension.
         let nether = Place {
             dimension: "minecraft:the_nether".into(),
             ..at(8.0, 8.0)
@@ -592,7 +589,7 @@ mod tests {
         let out = c
             .command(&alex, &nether, 1_000_000, &find, &name_of, "claim")
             .unwrap();
-        assert!(matches!(&out[0], Out::Reply(_)));
+        assert!(matches!(&out[0], Out::Error(e) if e.contains("free for all")));
         // Saved without them.
         c.save().unwrap();
         let again = Claims::open(&d, Config::default()).unwrap();
