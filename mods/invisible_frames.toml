@@ -1,0 +1,10 @@
+id = "invisible_frames"
+kind = "native-mod"
+repo = "AltMugen/horizon-invisible-frames"
+name = "Invisible Frames"
+summary = "Sneak-right-click a filled frame to hide and lock it, or restore it."
+description = "Server-side frame visibility toggling for Horizon 26.3. Ordinary and glowing frames are supported. Empty visible frames remain visible. Original MIT implementation inspired by ADHDMC/InvisibleFrames; no Java source or assets included. See the source repository for tested engine/mixin pins, build instructions and validation scope."
+authors = ["AltMugen"]
+owners = ["AltMugen"]
+license = "MIT"
+source = "https://github.com/AltMugen/horizon-invisible-frames"
